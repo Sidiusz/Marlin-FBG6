@@ -27,39 +27,23 @@
   #include "../../feature/e_parser.h"
 #endif
 
-#if ENABLED(SERIAL_DMA)
-  #include "HardwareSerial.h"
-#endif
-
 #include "../../core/serial_hook.h"
 
-#if ENABLED(SERIAL_DMA)
+typedef void (*usart_rx_callback_t)(serial_t * obj);
 
-  struct MarlinSerial : public HAL_HardwareSerial {
-    MarlinSerial(void *peripheral) : HAL_HardwareSerial(peripheral) { }
-    void begin(unsigned long baud, uint8_t config);
-    inline void begin(unsigned long baud) { begin(baud, SERIAL_8N1); }
-  };
+struct MarlinSerial : public HardwareSerial {
+  MarlinSerial(void *peripheral, usart_rx_callback_t rx_callback) :
+      HardwareSerial(peripheral), _rx_callback(rx_callback)
+  { }
 
-#else // Arduino non-DMA
+  void begin(unsigned long baud, uint8_t config);
+  inline void begin(unsigned long baud) { begin(baud, SERIAL_8N1); }
 
-  typedef void (*usart_rx_callback_t)(serial_t * obj);
+  void _rx_complete_irq(serial_t *obj);
 
-  struct MarlinSerial : public HardwareSerial {
-    MarlinSerial(void *peripheral, usart_rx_callback_t rx_callback)
-      : HardwareSerial(peripheral), _rx_callback(rx_callback) { }
-
-    void begin(unsigned long baud, uint8_t config);
-    inline void begin(unsigned long baud) { begin(baud, SERIAL_8N1); }
-
-    void _rx_complete_irq(serial_t *obj);
-    FORCE_INLINE static uint8_t buffer_overruns() { return 0; } // Not implemented. Void to avoid platform-dependent code.
-
-    protected:
-      usart_rx_callback_t _rx_callback;
-  };
-
-#endif
+protected:
+  usart_rx_callback_t _rx_callback;
+};
 
 typedef Serial1Class<MarlinSerial> MSerialT;
 extern MSerialT MSerial1;

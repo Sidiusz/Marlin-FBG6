@@ -1,0 +1,113 @@
+name: FB-G6-release
+
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Cache pip
+      uses: actions/cache@v2
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    - name: Cache PlatformIO
+      uses: actions/cache@v2
+      with:
+        path: ~/.platformio
+        key: ${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
+    - name: Set up Python
+      uses: actions/setup-python@v2
+    - name: Install PlatformIO
+      run: |
+        python -m pip install --upgrade pip
+        pip install --upgrade platformio
+    - name: Set version and build date
+      run:
+        sed -r -i "s/^(\s*#define\s+STRING_DISTRIBUTION_DATE) .*/\1 \"$(date +"%Y-%m-%d")\"/;s/^\s*(#define\s+GIT_VERSION) .*/\1 \"$(git describe --tags)\"/" Marlin/Version.h
+    - name: Build PlatformIO at 104GT-2/104NT
+      run: |
+        cp Marlin/build_params.variants/params_104gt.h Marlin/build_params.h
+        pio run -e mks_robin_nano_v3
+    - name: Zip artifact for deployment at 104GT-2/104NT
+      run: zip -j firmware_104gt_and_stock.zip .pio/build/mks_robin_nano_v3/firmware.bin
+
+    - name: Build PlatformIO at bltouch+104GT-2/104NT
+      run: |
+        cp Marlin/build_params.variants/params_bltouch104gt.h Marlin/build_params.h
+        pio run -e mks_robin_nano_v3
+    - name: Zip artifact for deployment at bltouch+104GT-2/104NT
+      run: zip -j firmware_bltouch_104gt_and_stock.zip .pio/build/mks_robin_nano_v3/firmware.bin
+
+    - name: Build PlatformIO at 3950
+      run: |
+        cp Marlin/build_params.variants/params_3950.h Marlin/build_params.h
+        pio run -e mks_robin_nano_v3
+    - name: Display fetched artifacts at 3950
+      run: ls -la .pio/build/mks_robin_nano_v3 | grep firmware
+    - name: Zip artifact for deployment at 3950
+      run: zip -j firmware_3950.zip .pio/build/mks_robin_nano_v3/firmware.bin
+
+    - name: Build PlatformIO at bltouch+3950
+      run: |
+        cp Marlin/build_params.variants/params_bltouch3950.h Marlin/build_params.h
+        pio run -e mks_robin_nano_v3
+    - name: Display fetched artifacts at bltouch+3950
+      run: ls -la .pio/build/mks_robin_nano_v3 | grep firmware
+    - name: Zip artifact for deployment at bltouch+3950
+      run: zip -j firmware_bltouch_3950.zip .pio/build/mks_robin_nano_v3/firmware.bin
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release firmware ${{ github.ref }}
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset at 104GT-2/104NT
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./firmware_104gt_and_stock.zip
+        asset_name: firmware_104gt_and_stock.zip
+        asset_content_type: application/zip
+    - name: Upload Release Asset at 3950
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./firmware_3950.zip
+        asset_name: firmware_3950.zip
+        asset_content_type: application/zip
+    - name: Upload Release Asset at bltouch+104GT-2/104NT
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./firmware_bltouch_104gt_and_stock.zip
+        asset_name: firmware_bltouch_104gt_and_stock.zip
+        asset_content_type: application/zip
+    - name: Upload Release Asset at bltouch+3950
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./firmware_bltouch_3950.zip
+        asset_name: firmware_bltouch_3950.zip
+        asset_content_type: application/zip
+
+on:
+  push:
+    tags:
+      - '*'

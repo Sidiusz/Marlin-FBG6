@@ -2,16 +2,10 @@
 #
 # schema.py
 #
-# Used by signature.py via common-dependencies.py to generate a schema file during the PlatformIO build
-# when CONFIG_EXPORT is defined in the configuration.
+# Used by signature.py via common-dependencies.py to generate a schema file during the PlatformIO build.
+# This script can also be run standalone from within the Marlin repo to generate all schema files.
 #
-# This script can also be run standalone from within the Marlin repo to generate JSON and YAML schema files.
-#
-# This script is a companion to abm/js/schema.js in the MarlinFirmware/AutoBuildMarlin project, which has
-# been extended to evaluate conditions and can determine what options are actually enabled, not just which
-# options are uncommented. That will be migrated to this script for standalone migration.
-#
-import re, json
+import re,json
 from pathlib import Path
 
 def extend_dict(d:dict, k:tuple):
@@ -80,28 +74,9 @@ def load_boards():
     return ''
 
 #
-# Extract the specified configuration files in the form of a structured schema.
-# Contains the full schema for the configuration files, not just the enabled options,
-# Contains the current values of the options, not just data structure, so "schema" is a slight misnomer.
+# Extract a schema from the current configuration files
 #
-# The returned object is a nested dictionary with the following indexing:
-#
-#  - schema[filekey][section][define_name] = define_info
-#
-# Where the define_info contains the following keyed fields:
-#    - section  = The @section the define is in
-#    - name     = The name of the define
-#    - enabled  = True if the define is enabled (not commented out)
-#    - line     = The line number of the define
-#    - sid      = A serial ID for the define
-#    - value    = The value of the define, if it has one
-#    - type     = The type of the define, if it has one
-#    - requires = The conditions that must be met for the define to be enabled
-#    - comment  = The comment for the define, if it has one
-#    - units    = The units for the define, if it has one
-#    - options  = The options for the define, if it has any
-#
-def extract_files(filekey):
+def extract():
     # Load board names from boards.h
     boards = load_boards()
 
@@ -110,16 +85,17 @@ def extract_files(filekey):
         NORMAL          = 0 # No condition yet
         BLOCK_COMMENT   = 1 # Looking for the end of the block comment
         EOL_COMMENT     = 2 # EOL comment started, maybe add the next comment?
-        SLASH_COMMENT   = 3 # Block-like comment, starting with aligned //
-        GET_SENSORS     = 4 # Gathering temperature sensor options
+        GET_SENSORS     = 3 # Gathering temperature sensor options
         ERROR           = 9 # Syntax error
 
+    # List of files to process, with shorthand
+    filekey = { 'Configuration.h':'basic', 'Configuration_adv.h':'advanced' }
     # A JSON object to store the data
-    sch_out = { key:{} for key in filekey.values() }
+    sch_out = { 'basic':{}, 'advanced':{} }
     # Regex for #define NAME [VALUE] [COMMENT] with sanitized line
     defgrep = re.compile(r'^(//)?\s*(#define)\s+([A-Za-z0-9_]+)\s*(.*?)\s*(//.+)?$')
-    # Pattern to match a float value
-    flt = r'[-+]?\s*(\d+\.|\d*\.\d+)([eE][-+]?\d+)?[fF]?'
+    # Defines to ignore
+    ignore = ('CONFIGURATION_H_VERSION', 'CONFIGURATION_ADV_H_VERSION', 'CONFIG_EXAMPLES_DIR', 'CONFIG_EXPORT')
     # Start with unknown state
     state = Parse.NORMAL
     # Serial ID
@@ -131,12 +107,11 @@ def extract_files(filekey):
             line_number = 0         # Counter for the line number of the file
             conditions = []         # Create a condition stack for the current file
             comment_buff = []       # A temporary buffer for comments
-            prev_comment = ''       # Copy before reset for an EOL comment
             options_json = ''       # A buffer for the most recent options JSON found
             eol_options = False     # The options came from end of line, so only apply once
             join_line = False       # A flag that the line should be joined with the previous one
             line = ''               # A line buffer to handle \ continuation
-            last_added_ref = {}     # Reference to the last added item
+            last_added_ref = None   # Reference to the last added item
             # Loop through the lines in the file
             for the_line in fileobj.readlines():
                 line_number += 1
@@ -168,20 +143,10 @@ def extract_files(filekey):
                     if not defmatch and the_line.startswith('//'):
                         comment_buff.append(the_line[2:].strip())
                     else:
-                        state = Parse.NORMAL
-                        cline = ' '.join(comment_buff)
+                        last_added_ref['comment'] = ' '.join(comment_buff)
                         comment_buff = []
-                        if cline != '':
-                            # A (block or slash) comment was already added
-                            cfield = 'notes' if 'comment' in last_added_ref else 'comment'
-                            last_added_ref[cfield] = cline
+                        state = Parse.NORMAL
 
-                #
-                # Add the given comment line to the comment buffer, unless:
-                # - The line starts with ':' and JSON values to assign to 'opt'.
-                # - The line starts with '@section' so a new section needs to be returned.
-                # - The line starts with '======' so just skip it.
-                #
                 def use_comment(c, opt, sec, bufref):
                     if c.startswith(':'):               # If the comment starts with : then it has magic JSON
                         d = c[1:].strip()               # Strip the leading :
@@ -197,15 +162,6 @@ def extract_files(filekey):
                         bufref.append(c)
                     return opt, sec
 
-                # For slash comments, capture consecutive slash comments.
-                # The comment will be applied to the next #define.
-                if state == Parse.SLASH_COMMENT:
-                    if not defmatch and the_line.startswith('//'):
-                        options_json, section = use_comment(the_line[2:].strip(), options_json, section, comment_buff)
-                        continue
-                    else:
-                        state = Parse.NORMAL
-
                 # In a block comment, capture lines up to the end of the comment.
                 # Assume nothing follows the comment closure.
                 if state in (Parse.BLOCK_COMMENT, Parse.GET_SENSORS):
@@ -218,22 +174,23 @@ def extract_files(filekey):
                         # Temperature sensors are done
                         if state == Parse.GET_SENSORS:
                             options_json = f'[ {options_json[:-2]} ]'
+
                         state = Parse.NORMAL
 
-                    # Strip the leading '* ' from block comments
-                    cline = re.sub(r'^\* ?', '', cline)
+                    # Strip the leading '*' from block comments
+                    if cline.startswith('*'): cline = cline[1:].strip()
 
                     # Collect temperature sensors
                     if state == Parse.GET_SENSORS:
                         sens = re.match(r'^(-?\d+)\s*:\s*(.+)$', cline)
                         if sens:
-                            s2 = sens[2].replace("'", "''")
-                            options_json += f"{sens[1]}:'{sens[1]} - {s2}', "
+                            s2 = sens[2].replace("'","''")
+                            options_json += f"{sens[1]}:'{s2}', "
 
                     elif state == Parse.BLOCK_COMMENT:
 
                         # Look for temperature sensors
-                        if re.match(r'temperature sensors.*:', cline, re.IGNORECASE):
+                        if cline == "Temperature sensors available:":
                             state, cline = Parse.GET_SENSORS, "Temperature Sensors"
 
                         options_json, section = use_comment(cline, options_json, section, comment_buff)
@@ -252,25 +209,22 @@ def extract_files(filekey):
                         comment_buff = []
                         state = Parse.BLOCK_COMMENT
                         eol_options = False
+
                     elif cpos2 != -1 and (cpos2 < cpos1 or cpos1 == -1):
                         cpos = cpos2
 
                         # Comment after a define may be continued on the following lines
-                        if defmatch is not None and cpos > 10:
+                        if defmatch != None and cpos > 10:
                             state = Parse.EOL_COMMENT
-                            prev_comment = '\n'.join(comment_buff)
                             comment_buff = []
-                        else:
-                            state = Parse.SLASH_COMMENT
 
                     # Process the start of a new comment
                     if cpos != -1:
-                        comment_buff = []
                         cline, line = line[cpos+2:].strip(), line[:cpos].strip()
 
                         if state == Parse.BLOCK_COMMENT:
                             # Strip leading '*' from block comments
-                            cline = re.sub(r'^\* ?', '', cline)
+                            if cline.startswith('*'): cline = cline[1:].strip()
                         else:
                             # Expire end-of-line options after first use
                             if cline.startswith(':'): eol_options = True
@@ -323,10 +277,10 @@ def extract_files(filekey):
                         conditions.append([ f'!defined({line[7:].strip()})' ])
 
                     # Handle a complete #define line
-                    elif defmatch is not None:
+                    elif defmatch != None:
 
                         # Get the match groups into vars
-                        enabled, define_name, val = defmatch[1] is None, defmatch[3], defmatch[4]
+                        enabled, define_name, val = defmatch[1] == None, defmatch[3], defmatch[4]
 
                         # Increment the serial ID
                         sid += 1
@@ -341,37 +295,36 @@ def extract_files(filekey):
                         }
 
                         # Type is based on the value
-                        value_type = \
-                             'switch'  if val == '' \
-                        else 'bool'    if re.match(r'^(true|false)$', val) \
-                        else 'int'     if re.match(r'^[-+]?\s*\d+$', val) \
-                        else 'ints'    if re.match(r'^([-+]?\s*\d+)(\s*,\s*[-+]?\s*\d+)+$', val) \
-                        else 'floats'  if re.match(rf'({flt}(\s*,\s*{flt})+)', val) \
-                        else 'float'   if re.match(f'^({flt})$', val) \
-                        else 'string'  if val[0] == '"' \
-                        else 'char'    if val[0] == "'" \
-                        else 'state'   if re.match(r'^(LOW|HIGH)$', val) \
-                        else 'enum'    if re.match(r'^[A-Za-z0-9_]{3,}$', val) \
-                        else 'int[]'   if re.match(r'^{\s*[-+]?\s*\d+(\s*,\s*[-+]?\s*\d+)*\s*}$', val) \
-                        else 'float[]' if re.match(r'^{{\s*{flt}(\s*,\s*{flt})*\s*}}$', val) \
-                        else 'array'   if val[0] == '{' \
-                        else ''
-
-                        val = (val == 'true')           if value_type == 'bool' \
-                        else int(val)                   if value_type == 'int' \
-                        else val.replace('f','')        if value_type == 'floats' \
-                        else float(val.replace('f','')) if value_type == 'float' \
-                        else val
+                        if val == '':
+                            value_type = 'switch'
+                        elif re.match(r'^(true|false)$', val):
+                            value_type = 'bool'
+                            val = val == 'true'
+                        elif re.match(r'^[-+]?\s*\d+$', val):
+                            value_type = 'int'
+                            val = int(val)
+                        elif re.match(r'[-+]?\s*(\d+\.|\d*\.\d+)([eE][-+]?\d+)?[fF]?', val):
+                            value_type = 'float'
+                            val = float(val.replace('f',''))
+                        else:
+                            value_type = 'string'   if val[0] == '"' \
+                                    else 'char'     if val[0] == "'" \
+                                    else 'state'    if re.match(r'^(LOW|HIGH)$', val) \
+                                    else 'enum'     if re.match(r'^[A-Za-z0-9_]{3,}$', val) \
+                                    else 'int[]'    if re.match(r'^{(\s*[-+]?\s*\d+\s*(,\s*)?)+}$', val) \
+                                    else 'float[]'  if re.match(r'^{(\s*[-+]?\s*(\d+\.|\d*\.\d+)([eE][-+]?\d+)?[fF]?\s*(,\s*)?)+}$', val) \
+                                    else 'array'    if val[0] == '{' \
+                                    else ''
 
                         if val != '': define_info['value'] = val
                         if value_type != '': define_info['type'] = value_type
 
                         # Join up accumulated conditions with &&
-                        if conditions: define_info['requires'] = '(' + ') && ('.join(sum(conditions, [])) + ')'
+                        if conditions: define_info['requires'] = ' && '.join(sum(conditions, []))
 
                         # If the comment_buff is not empty, add the comment to the info
                         if comment_buff:
-                            full_comment = '\n'.join(comment_buff).strip()
+                            full_comment = '\n'.join(comment_buff)
 
                             # An EOL comment will be added later
                             # The handling could go here instead of above
@@ -387,14 +340,6 @@ def extract_files(filekey):
                                 units = units[1]
                                 if units == 's' or units == 'sec': units = 'seconds'
                                 define_info['units'] = units
-
-                        if 'comment' not in define_info or define_info['comment'] == '':
-                            if prev_comment:
-                                define_info['comment'] = prev_comment
-                                prev_comment = ''
-
-                        if 'comment' in define_info and define_info['comment'] == '':
-                            del define_info['comment']
 
                         # Set the options for the current #define
                         if define_name == "MOTHERBOARD" and boards != '':
@@ -420,13 +365,6 @@ def extract_files(filekey):
 
     return sch_out
 
-#
-# Extract the current configuration files in the form of a structured schema.
-#
-def extract():
-    # List of files to process, with shorthand
-    return extract_files({ 'Configuration.h':'basic', 'Configuration_adv.h':'advanced' })
-
 def dump_json(schema:dict, jpath:Path):
     with jpath.open('w') as jfile:
         json.dump(schema, jfile, ensure_ascii=False, indent=2)
@@ -445,35 +383,25 @@ def main():
 
     if schema:
 
-        # Get the command line arguments after the script name
+        # Get the first command line argument
         import sys
-        args = sys.argv[1:]
-        if len(args) == 0: args = ['some']
-
-        # Does the given array intersect at all with args?
-        def inargs(c): return len(set(args) & set(c)) > 0
-
-        # Help / Unknown option
-        unk = not inargs(['some','json','jsons','group','yml','yaml'])
-        if (unk): print(f"Unknown option: '{args[0]}'")
-        if inargs(['-h', '--help']) or unk:
-            print("Usage: schema.py [some|json|jsons|group|yml|yaml]...")
-            print("       some  = json + yml")
-            print("       jsons = json + group")
-            return
+        if len(sys.argv) > 1:
+            arg = sys.argv[1]
+        else:
+            arg = 'some'
 
         # JSON schema
-        if inargs(['some', 'json', 'jsons']):
+        if arg in ['some', 'json', 'jsons']:
             print("Generating JSON ...")
             dump_json(schema, Path('schema.json'))
 
         # JSON schema (wildcard names)
-        if inargs(['group', 'jsons']):
+        if arg in ['group', 'jsons']:
             group_options(schema)
             dump_json(schema, Path('schema_grouped.json'))
 
         # YAML
-        if inargs(['some', 'yml', 'yaml']):
+        if arg in ['some', 'yml', 'yaml']:
             try:
                 import yaml
             except ImportError:

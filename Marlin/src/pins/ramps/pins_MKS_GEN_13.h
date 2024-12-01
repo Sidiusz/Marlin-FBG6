@@ -23,8 +23,6 @@
 
 /**
  * Arduino Mega with RAMPS v1.4 adjusted pin assignments
- * Schematic (1.4): https://github.com/makerbase-mks/MKS-GEN/blob/master/hardware/MKS%20GEN%20V1.4_004/MKS%20GEN%20V1.4_004%20SCH.pdf
- * ATmega2560, ATmega1280
  *
  *  MKS GEN v1.3  (Extruder, Fan, Bed)
  *  MKS GEN v1.3  (Extruder, Extruder, Fan, Bed)
@@ -41,8 +39,8 @@
 //
 // Heaters / Fans
 //
-#define MOSFET_B_PIN                           7
-#define FAN0_PIN                               9
+// Power outputs EFBF or EFBE
+#define MOSFET_D_PIN                           7
 
 //
 // PSU / SERVO
@@ -62,8 +60,7 @@
 //
 // LCD / Controller
 //
-
-#if ANY(VIKI2, miniVIKI)
+#if EITHER(VIKI2, miniVIKI)
   /**
    * VIKI2 Has two groups of wires with...
    *

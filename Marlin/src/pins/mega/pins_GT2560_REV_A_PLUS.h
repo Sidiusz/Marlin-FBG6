@@ -23,12 +23,12 @@
 
 /**
  * Geeetech GT2560 Revision A+ board pin assignments
- * Schematic: https://www.geeetech.com/wiki/images/d/d3/Hardware_GT2560_RevA%2B.pdf
- * ATmega2560
  */
 
 #define BOARD_INFO_NAME "GT2560 Rev.A+"
 
-#define SERVO0_PIN                            11
-
 #include "pins_GT2560_REV_A.h"
+
+#if DISABLED(BLTOUCH)
+  #define SERVO0_PIN  32
+#endif

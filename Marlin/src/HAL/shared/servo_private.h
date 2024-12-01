@@ -63,7 +63,7 @@
 #define REFRESH_INTERVAL    20000     // minimum time to refresh servos in microseconds
 
 #define SERVOS_PER_TIMER       12     // the maximum number of servos controlled by one timer
-#define MAX_SERVOS   (_Nbr_16timers  * SERVOS_PER_TIMER)
+//#define MAX_SERVOS   (_Nbr_16timers  * SERVOS_PER_TIMER)
 
 #define INVALID_SERVO         255     // flag indicating an invalid servo index
 
@@ -96,5 +96,5 @@ extern ServoInfo_t servo_info[MAX_SERVOS];
 
 // Public functions
 
-void initISR(const timer16_Sequence_t timer_index);
-void finISR(const timer16_Sequence_t timer_index);
+//void initISR(const timer16_Sequence_t timer_index);
+//void finISR(const timer16_Sequence_t timer_index);

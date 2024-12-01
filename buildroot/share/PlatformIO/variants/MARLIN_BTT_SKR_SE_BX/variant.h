@@ -188,20 +188,13 @@ extern "C" {
 
 // #define USE_USB_FS
 /* Extra HAL modules */
-#ifndef HAL_HCD_MODULE_ENABLED
-  //#define HAL_HCD_MODULE_ENABLED
-#endif
-#ifndef HAL_DAC_MODULE_ENABLED
-  //#define HAL_DAC_MODULE_ENABLED
-#endif
-#ifndef HAL_ETH_MODULE_ENABLED
-  //#define HAL_ETH_MODULE_ENABLED
-#endif
+//#define HAL_HCD_MODULE_ENABLED
+//#define HAL_DAC_MODULE_ENABLED
+//#define HAL_ETH_MODULE_ENABLED
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
-
 /*----------------------------------------------------------------------------
  *        Arduino objects - C++ only
  *----------------------------------------------------------------------------*/

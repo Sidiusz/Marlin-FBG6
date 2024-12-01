@@ -4,6 +4,7 @@
  *
  * Based on Sprinter and grbl.
  * Copyright (c) 2011 Camiel Gubbels / Erik van der Zalm
+ * Copyright (c) 2017 Victor Perez
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -52,7 +53,7 @@ static SPISettings spiConfig;
 // ------------------------
 
 void spiBegin() {
-  #if HAS_MEDIA && PIN_EXISTS(SD_SS)
+  #if ENABLED(SDSUPPORT) && PIN_EXISTS(SD_SS)
     OUT_WRITE(SD_SS_PIN, HIGH);
   #endif
 }

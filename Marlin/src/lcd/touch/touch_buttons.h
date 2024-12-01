@@ -29,8 +29,8 @@
 #define UPSCALE0(M) ((M) * (GRAPHICAL_TFT_UPSCALE))
 #define UPSCALE(A,M) (UPSCALE0(M) + (A))
 
-#define BUTTON_DRAW_WIDTH  32
-#define BUTTON_DRAW_HEIGHT 20
+#define BUTTON_DRAW_WIDTH  20
+#define BUTTON_DRAW_HEIGHT 32
 
 #define BUTTON_WIDTH  UPSCALE0(BUTTON_DRAW_WIDTH)
 #define BUTTON_HEIGHT UPSCALE0(BUTTON_DRAW_HEIGHT)
@@ -53,13 +53,14 @@
 #define BUTTON_Y_HI (TFT_HEIGHT) - BUTTON_SPACING
 #define BUTTON_Y_LO BUTTON_Y_HI - BUTTON_HEIGHT
 
+#define TSLP_PREINIT  0
 #define TSLP_SLEEPING 1
 
 class TouchButtons {
 public:
   static void init();
   static uint8_t read_buttons();
-  #if HAS_DISPLAY_SLEEP
+  #if HAS_TOUCH_SLEEP
     static millis_t next_sleep_ms;
     static bool isSleeping() { return next_sleep_ms == TSLP_SLEEPING; }
     static void sleepTimeout();

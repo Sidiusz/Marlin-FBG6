@@ -44,20 +44,15 @@ namespace ExtUI {
     KillScreen::show(str);
   }
 
-  void onMediaMounted() {
-    #if HAS_MEDIA
+  void onMediaInserted() {
+    #if ENABLED(SDSUPPORT)
       sound.play(media_inserted, PLAY_ASYNCHRONOUS);
-      StatusScreen::onMediaMounted();
+      StatusScreen::onMediaInserted();
     #endif
   }
 
-  void onMediaError() {
-    sound.play(sad_trombone, PLAY_ASYNCHRONOUS);
-    AlertDialogBox::showError(F("Unable to read media."));
-  }
-
   void onMediaRemoved() {
-    #if HAS_MEDIA
+    #if ENABLED(SDSUPPORT)
       if (isPrintingFromMedia()) {
         stopPrint();
         InterfaceSoundsScreen::playEventSound(InterfaceSoundsScreen::PRINTING_FAILED);
@@ -70,22 +65,21 @@ namespace ExtUI {
     #endif
   }
 
-  void onHeatingError(const heater_id_t header_id) {}
-  void onMinTempError(const heater_id_t header_id) {}
-  void onMaxTempError(const heater_id_t header_id) {}
+  void onMediaError() {
+    sound.play(sad_trombone, PLAY_ASYNCHRONOUS);
+    AlertDialogBox::showError(F("Unable to read media."));
+  }
 
   void onStatusChanged(const char *lcd_msg) { StatusScreen::setStatusMessage(lcd_msg); }
 
   void onPrintTimerStarted() {
     InterfaceSoundsScreen::playEventSound(InterfaceSoundsScreen::PRINTING_STARTED);
-    current_screen.forget();
-    PUSH_SCREEN(StatusScreen);
   }
   void onPrintTimerStopped() {
     InterfaceSoundsScreen::playEventSound(InterfaceSoundsScreen::PRINTING_FINISHED);
   }
-  void onPrintTimerPaused() {}
 
+  void onPrintTimerPaused() {}
   void onPrintDone() {}
 
   void onFilamentRunout(const extruder_t extruder) {
@@ -103,7 +97,7 @@ namespace ExtUI {
   void onLoadSettings(const char *buff) { InterfaceSettingsScreen::loadSettings(buff); }
   void onPostprocessSettings() {} // Called after loading or resetting stored settings
 
-  void onSettingsStored(const bool success) {
+  void onSettingsStored(bool success) {
     #ifdef ARCHIM2_SPI_FLASH_EEPROM_BACKUP_SIZE
       if (success && InterfaceSettingsScreen::backupEEPROM()) {
         SERIAL_ECHOLNPGM("EEPROM backed up to SPI Flash");
@@ -112,91 +106,38 @@ namespace ExtUI {
       UNUSED(success);
     #endif
   }
-  void onSettingsLoaded(const bool) {}
+  void onSettingsLoaded(bool) {}
 
-  void onPlayTone(const uint16_t frequency, const uint16_t duration/*=0*/) { sound.play_tone(frequency, duration); }
+  void onPlayTone(const uint16_t frequency, const uint16_t duration) { sound.play_tone(frequency, duration); }
 
   void onUserConfirmRequired(const char * const msg) {
     if (msg)
       ConfirmUserRequestAlertBox::show(msg);
     else
-      ConfirmUserRequestAlertBox::show("Press Resume to Continue");
+      ConfirmUserRequestAlertBox::hide();
   }
 
-  #if ENABLED(ADVANCED_PAUSE_FEATURE)
-    void filament_load_prompt(const char * const msg) {
-      if (msg)
-        FilamentPromptBox::show();
-      else
-        FilamentPromptBox::hide();
-    }
-  #endif
-
-  // For fancy LCDs include an icon ID, message, and translated button title
-  void onUserConfirmRequired(const int icon, const char * const cstr, FSTR_P const fBtn) {
-    onUserConfirmRequired(cstr);
-    UNUSED(icon); UNUSED(fBtn);
-  }
-  void onUserConfirmRequired(const int icon, FSTR_P const fstr, FSTR_P const fBtn) {
-    onUserConfirmRequired(fstr);
-    UNUSED(icon); UNUSED(fBtn);
-  }
-
-  #if ENABLED(ADVANCED_PAUSE_FEATURE)
-    void onPauseMode(
-      const PauseMessage message,
-      const PauseMode mode/*=PAUSE_MODE_SAME*/,
-      const uint8_t extruder/*=active_extruder*/
-    ) {
-      stdOnPauseMode(message, mode, extruder);
-    }
-  #endif
-
-  #if HAS_LEVELING
+  #if HAS_LEVELING && HAS_MESH
     void onLevelingStart() {}
     void onLevelingDone() {}
-    #if ENABLED(PREHEAT_BEFORE_LEVELING)
-      celsius_t getLevelingBedTemp() { return LEVELING_BED_TEMP; }
-    #endif
-  #endif
-
-  #if HAS_MESH
-    void onMeshUpdate(const int8_t x, const int8_t y, const_float_t val) {
-      BedMeshViewScreen::onMeshUpdate(x, y, val);
-    }
-    void onMeshUpdate(const int8_t x, const int8_t y, const ExtUI::probe_state_t state) {
-      BedMeshViewScreen::onMeshUpdate(x, y, state);
-    }
-  #endif
-
-  #if ENABLED(PREVENT_COLD_EXTRUSION)
-    void onSetMinExtrusionTemp(const celsius_t) {}
+    void onMeshUpdate(const int8_t x, const int8_t y, const_float_t val) { BedMeshViewScreen::onMeshUpdate(x, y, val); }
+    void onMeshUpdate(const int8_t x, const int8_t y, const ExtUI::probe_state_t state) { BedMeshViewScreen::onMeshUpdate(x, y, state); }
   #endif
 
   #if ENABLED(POWER_LOSS_RECOVERY)
-    void onSetPowerLoss(const bool onoff) {
-      // Called when power-loss is enabled/disabled
-    }
-    void onPowerLoss() {
-      // Called when power-loss state is detected
-    }
-    void onPowerLossResume() {
-      // Called on resume from power-loss
-    }
+    void onPowerLossResume() {} // Called on resume from power-loss
   #endif
 
   #if HAS_PID_HEATING
-    void onPIDTuning(const pidresult_t rst) {
+    void onPidTuning(const result_t rst) {
       // Called for temperature PID tuning result
-      //SERIAL_ECHOLNPGM("OnPIDTuning:", rst);
+      //SERIAL_ECHOLNPGM("OnPidTuning:", rst);
       switch (rst) {
         case PID_STARTED:
-        case PID_BED_STARTED:
-        case PID_CHAMBER_STARTED:
           StatusScreen::setStatusMessage(GET_TEXT_F(MSG_PID_AUTOTUNE));
           break;
-        case PID_BAD_HEATER_ID:
-          StatusScreen::setStatusMessage(GET_TEXT_F(MSG_PID_BAD_HEATER_ID));
+        case PID_BAD_EXTRUDER_NUM:
+          StatusScreen::setStatusMessage(GET_TEXT_F(MSG_PID_BAD_EXTRUDER_NUM));
           break;
         case PID_TEMP_TOO_HIGH:
           StatusScreen::setStatusMessage(GET_TEXT_F(MSG_PID_TEMP_TOO_HIGH));
@@ -210,31 +151,10 @@ namespace ExtUI {
       }
       GOTO_SCREEN(StatusScreen);
     }
-    void onStartM303(const int count, const heater_id_t hid, const celsius_t temp) {
-      // Called by M303 to update the UI
-    }
   #endif // HAS_PID_HEATING
 
-  #if ENABLED(MPC_AUTOTUNE)
-    void onMPCTuning(const mpcresult_t rst) {
-      // Called for temperature PID tuning result
-      switch (rst) {
-        case MPC_STARTED:
-          StatusScreen::setStatusMessage(GET_TEXT_F(MSG_MPC_AUTOTUNE));
-          break;
-      }
-      GOTO_SCREEN(StatusScreen);
-    }
-  #endif
-
-  #if ENABLED(PLATFORM_M997_SUPPORT)
-    void onFirmwareFlash() {}
-  #endif
-
   void onSteppersDisabled() {}
-  void onSteppersEnabled() {}
-  void onAxisDisabled(const axis_t) {}
-  void onAxisEnabled(const axis_t) {}
+  void onSteppersEnabled()  {}
 }
 
 #endif // TOUCH_UI_FTDI_EVE

@@ -27,18 +27,30 @@
 #include "touch.h"
 
 #include "../marlinui.h"  // for ui methods
-#include "../menu/menu_item.h" // for MSG_FIRST_FAN_SPEED
+#include "../menu/menu_item.h" // for touch_screen_calibration
 
 #include "../../module/temperature.h"
 #include "../../module/planner.h"
+#include "../../module/stepper.h"
 
-#if ENABLED(AUTO_BED_LEVELING_UBL)
-  #include "../../feature/bedlevel/bedlevel.h"
+#if HAS_BED_PROBE
+  #include "../../module/probe.h"
+#endif
+
+
+#if ENABLED(PSU_CONTROL)
+  #include "../../feature/power.h"
+#endif
+
+#include "../../feature/caselight.h"
+
+#include "../../feature/bedlevel/bedlevel.h"
+
+#if ENABLED(MKS_WIFI_MODULE)
+  #include "../../module/wifi/wifi.h"
 #endif
 
 #include "tft.h"
-
-Touch touch;
 
 bool Touch::enabled = true;
 int16_t Touch::x, Touch::y;
@@ -50,7 +62,7 @@ millis_t Touch::next_touch_ms = 0,
          Touch::repeat_delay,
          Touch::touch_time;
 TouchControlType Touch::touch_control_type = NONE;
-#if HAS_DISPLAY_SLEEP
+#if HAS_TOUCH_SLEEP
   millis_t Touch::next_sleep_ms; // = 0
 #endif
 #if HAS_RESUME_CONTINUE
@@ -60,8 +72,8 @@ TouchControlType Touch::touch_control_type = NONE;
 void Touch::init() {
   TERN_(TOUCH_SCREEN_CALIBRATION, touch_calibration.calibration_reset());
   reset();
-  io.init();
-  TERN_(HAS_DISPLAY_SLEEP, wakeUp());
+  io.Init();
+  TERN_(HAS_TOUCH_SLEEP, wakeUp());
   enable();
 }
 
@@ -77,7 +89,13 @@ void Touch::add_control(TouchControlType type, uint16_t x, uint16_t y, uint16_t 
   controls_count++;
 }
 
+void Clear_midle_screen(){
+  tft.canvas(0, 200, 320, 224);
+  tft.set_background(COLOR_BACKGROUND);
+}
+
 void Touch::idle() {
+  uint16_t i;
   int16_t _x, _y;
 
   if (!enabled) return;
@@ -114,15 +132,17 @@ void Touch::idle() {
     if (x != 0 && y != 0) {
       if (current_control) {
         if (WITHIN(x, current_control->x - FREE_MOVE_RANGE, current_control->x + current_control->width + FREE_MOVE_RANGE) && WITHIN(y, current_control->y - FREE_MOVE_RANGE, current_control->y + current_control->height + FREE_MOVE_RANGE)) {
-          LIMIT(x, current_control->x, current_control->x + current_control->width);
-          LIMIT(y, current_control->y, current_control->y + current_control->height);
+          NOLESS(x, current_control->x);
+          NOMORE(x, current_control->x + current_control->width);
+          NOLESS(y, current_control->y);
+          NOMORE(y, current_control->y + current_control->height);
           touch(current_control);
         }
         else
           current_control = nullptr;
       }
       else {
-        for (uint16_t i = 0; i < controls_count; i++) {
+        for (i = 0; i < controls_count; i++) {
           if ((WITHIN(x, controls[i].x, controls[i].x + controls[i].width) && WITHIN(y, controls[i].y, controls[i].y + controls[i].height)) || (TERN(TOUCH_SCREEN_CALIBRATION, controls[i].type == CALIBRATE, false))) {
             touch_control_type = controls[i].type;
             touch(&controls[i]);
@@ -153,7 +173,7 @@ void Touch::touch(touch_control_t *control) {
       case CALIBRATE:
         if (touch_calibration.handleTouch(x, y)) ui.refresh();
         break;
-    #endif
+    #endif // TOUCH_SCREEN_CALIBRATION
 
     case MENU_SCREEN: ui.goto_screen((screenFunc_t)control->data); break;
     case BACK: ui.goto_previous_screen(); break;
@@ -181,12 +201,128 @@ void Touch::touch(touch_control_t *control) {
     case SLIDER:    hold(control); ui.encoderPosition = (x - control->x) * control->data / control->width; break;
     case INCREASE:  hold(control, repeat_delay - 5); TERN(AUTO_BED_LEVELING_UBL, ui.external_control ? bedlevel.encoder_diff++ : ui.encoderPosition++, ui.encoderPosition++); break;
     case DECREASE:  hold(control, repeat_delay - 5); TERN(AUTO_BED_LEVELING_UBL, ui.external_control ? bedlevel.encoder_diff-- : ui.encoderPosition--, ui.encoderPosition--); break;
+    #ifdef MKS_WIFI_MODULE
+    case WIFI_LOAD:
+      ui.goto_screen((screenFunc_t)menu_info_wifi_load);
+      break;
+    #endif
+    case FILAMENT_MOVE:
+      int8_t direction;
+      direction = control->data;
+      //push 200mm fila
+      if (direction == 1) {
+        if (!printingIsActive()) {
+          if (thermalManager.wholeDegHotend(H_E0) < EXTRUDE_MINTEMP) {
+            tft.canvas(20, 420, 200, 40);
+            tft.set_background(COLOR_BACKGROUND);
+            //tft.add_text(0, 0, COLOR_YELLOW, "Too Cold");
+
+            tft_string.set(GET_TEXT(MSG_CUSTOM_TOO_COLD));
+            tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+
+          } else {
+            queue.inject("G91\nG1 X0 Y0 Z0 E200 F300\nG90");
+            tft.canvas(20, 420, 200, 40);
+            tft.set_background(COLOR_BACKGROUND);
+            //tft.add_text(0, 0, COLOR_YELLOW, "Input 200mm");
+
+            tft_string.set(GET_TEXT(MSG_CUSTOM_INPUT_200_MILIMETERS));
+            tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+          }
+        } else {
+          tft.canvas(20, 420, 200, 40);
+          tft.set_background(COLOR_BACKGROUND);
+          //tft.add_text(0, 0, COLOR_YELLOW, "Print is Active");
+
+          tft_string.set(GET_TEXT(MSG_CUSTOM_PRINT_IS_ACTIVE));
+          tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+        }
+      }
+      //pull 200mm fila
+      if (direction == -1) {
+        if (!printingIsActive()) {
+          if (thermalManager.wholeDegHotend(H_E0) < EXTRUDE_MINTEMP) {
+            tft.canvas(20, 420, 200, 40);
+            tft.set_background(COLOR_BACKGROUND);
+            //tft.add_text(0, 0, COLOR_YELLOW, "Too Cold");
+
+            tft_string.set(GET_TEXT(MSG_CUSTOM_TOO_COLD));
+            tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+          } else {
+            queue.inject("G91\nG1 X0 Y0 Z0 E-200 F300\nG90");
+            tft.canvas(20, 420, 200, 40);
+            tft.set_background(COLOR_BACKGROUND);
+            //tft.add_text(0, 0, COLOR_YELLOW, "Output 200mm");
+
+            tft_string.set(GET_TEXT(MSG_CUSTOM_INPUT_200_MILIMETERS));
+            tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+          }
+        } else {
+          tft.canvas(20, 420, 200, 40);
+          tft.set_background(COLOR_BACKGROUND);
+          //tft.add_text(0, 0, COLOR_YELLOW, "Print is Active");
+
+          tft_string.set(GET_TEXT(MSG_CUSTOM_PRINT_IS_ACTIVE));
+          tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+        }
+      }
+      if (direction == 0) {
+        if (!printingIsActive()) {
+          tft.canvas(20, 420, 200, 40);
+          tft.set_background(COLOR_BACKGROUND);
+          //tft.add_text(0, 0, COLOR_YELLOW, "Stoping Extruder");
+
+          tft_string.set(GET_TEXT(MSG_CUSTOM_STOPPING_EXTRUDER));
+          tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+          planner.quick_stop();
+          planner.synchronize();
+          stepper.disable_e_steppers();
+        } else {
+          tft.canvas(20, 420, 200, 40);
+          tft.set_background(COLOR_BACKGROUND);
+          //tft.add_text(0, 0, COLOR_YELLOW, "Print is Active");
+
+          tft.add_text(0, 0, COLOR_YELLOW, GET_TEXT_F(MSG_CUSTOM_PRINT_IS_ACTIVE));
+
+          //tft_string.set(GET_TEXT(MSG_CUSTOM_PRINT_IS_ACTIVE));
+          //tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+        }
+      }
+      break;
     case HEATER:
       int8_t heater;
       heater = control->data;
-      ui.clear_for_drawing();
+      if (heater == H_BED) {
+        ui.goto_screen((screenFunc_t)ui.bed_screen);
+      } else {
+        ui.goto_screen((screenFunc_t)ui.heater_screen);
+      }
+      break;
+    case HEAT_EXT:
+      int16_t ext_temp;
+      ext_temp = control->data;
+      if ((ext_temp == 0) & printingIsActive()) {
+        tft.canvas(20, 420, 200, 40);
+        tft.set_background(COLOR_BACKGROUND);
+        //tft.add_text(0, 0, COLOR_YELLOW, "Print is Active");
+
+        tft_string.set(GET_TEXT(MSG_CUSTOM_PRINT_IS_ACTIVE));
+        tft.add_text(0, 0, COLOR_YELLOW, tft_string);//SIDIUSZ
+      } else {
+        thermalManager.setTargetHotend(ext_temp, H_E0);
+      }
+      break;
+    case HEAT_BED:
+      int16_t bed_temp;
+      bed_temp = control->data;
+      thermalManager.setTargetBed(bed_temp);
+      break;
+    case HEATER_MANUAL:
+      int8_t heater_manual;
+      heater_manual = control->data;
+      ui.clear_lcd();
       #if HAS_HOTEND
-        if (heater >= 0) { // HotEnd
+        if (heater_manual >= 0) { // HotEnd
           #if HOTENDS == 1
             MenuItem_int3::action(GET_TEXT_F(MSG_NOZZLE), &thermalManager.temp_hotend[0].target, 0, thermalManager.hotend_max_target(0), []{ thermalManager.start_watching_hotend(0); });
           #else
@@ -196,57 +332,149 @@ void Touch::touch(touch_control_t *control) {
         }
       #endif
       #if HAS_HEATED_BED
-        else if (heater == H_BED) {
+        else if (heater_manual == H_BED) {
           MenuItem_int3::action(GET_TEXT_F(MSG_BED), &thermalManager.temp_bed.target, 0, BED_MAX_TARGET, thermalManager.start_watching_bed);
         }
       #endif
       #if HAS_HEATED_CHAMBER
-        else if (heater == H_CHAMBER) {
+        else if (heater_manual == H_CHAMBER) {
           MenuItem_int3::action(GET_TEXT_F(MSG_CHAMBER), &thermalManager.temp_chamber.target, 0, CHAMBER_MAX_TARGET, thermalManager.start_watching_chamber);
         }
       #endif
       #if HAS_COOLER
-        else if (heater == H_COOLER) {
+        else if (heater_manual == H_COOLER) {
           MenuItem_int3::action(GET_TEXT_F(MSG_COOLER), &thermalManager.temp_cooler.target, 0, COOLER_MAX_TARGET, thermalManager.start_watching_cooler);
         }
       #endif
 
       break;
+    case RETRY_PRINT:
+      //Print file again
+      card.openAndPrintFile(card.filename);
+      ui.return_to_status();
+      ui.reset_status();
+      Clear_midle_screen();
+      ui.screen_num = 0;
+      break;
+    case SAVE_EEPROM:
+      ui.store_settings();
+    break;
+    case TRAMMING:
+      #if ENABLED(FB_G6_CUSTOM_TRAMMING)
+        ui.goto_screen(ui.tramming_screen);
+      #elif ENABLED(LCD_BED_LEVELING)
+        _lcd_level_bed_corners();
+      #endif
+      break;
+    case LA_SET:
+      ui.clear_lcd();
+      MenuItem_float42_52::action(GET_TEXT_F(MSG_ADVANCE_K), &planner.extruder_advance_K[0], 0, 1);
+      break;
+    case BABYSTEP_BUTTON:
+      lcd_babystep_z();
+      break;
+    #ifdef PSU_CONTROL
+    case POWER_OFF:
+      ui.poweroff();
+      break;
+    #endif
+    case SET_FAN_SPEED:
+      static uint8_t set_fan_speed;
+      set_fan_speed = control->data;
+      // if ((set_fan_speed >= 0) || (set_fan_speed <=255)) {
+        thermalManager.set_fan_speed(0, set_fan_speed);
+      // }
+      break;
+
+    case BED_Z:
+      ui.clear_lcd();
+      #if ENABLED(MESH_BED_LEVELING)
+        MenuItem_float43::action(GET_TEXT_F(MSG_BED_Z), &bedlevel.z_offset, -3, 3);
+      #elif HAS_BED_PROBE
+        MenuItem_float42_52::action(GET_TEXT_F(MSG_BED_Z), &probe.offset.z, Z_PROBE_OFFSET_RANGE_MIN, Z_PROBE_OFFSET_RANGE_MAX);
+      #endif
+    break;
+
+    case CASE_LIGHT:
+      if (caselight.on) {
+        caselight.on = false;
+      } else {
+        caselight.on = true;
+      }
+      caselight.update_enabled();
+    break;
+    case NEXT_SCREEN:
+      ui.screen_num = 1;
+      Clear_midle_screen();
+      // ui.clear_lcd();
+    break;
+    case PREVOUS_SCREEN:
+      ui.screen_num = 0;
+      Clear_midle_screen();
+      // ui.clear_lcd();
+    break;
+    // case CHANGE_FILAMENT:
+    //   menu_change_filament();
+    // break;
+
+    case CHAMBER_FAN:
+      bool chamber_fan_status;
+      chamber_fan_status = control->data;
+      if (chamber_fan_status == true) {
+        thermalManager.set_fan_speed(1,255);
+      } else {
+        thermalManager.set_fan_speed(1,0);
+      }
+      break;
     case FAN:
-      ui.clear_for_drawing();
+      ui.goto_screen((screenFunc_t)ui.fan_screen);
+      break;
+    case FAN_MANUAL:
+      ui.clear_lcd();
       static uint8_t fan, fan_speed;
       fan = 0;
       fan_speed = thermalManager.fan_speed[fan];
-      MenuItem_percent::action(GET_TEXT_F(MSG_FIRST_FAN_SPEED), &fan_speed, 0, 255, []{ thermalManager.set_fan_speed(fan, fan_speed); TERN_(LASER_SYNCHRONOUS_M106_M107, planner.buffer_sync_block(BLOCK_BIT_SYNC_FANS));});
+      MenuItem_percent::action(GET_TEXT_F(MSG_FIRST_FAN_SPEED), &fan_speed, 0, 255, []{ thermalManager.set_fan_speed(fan, fan_speed); });
       break;
     case FEEDRATE:
-      ui.clear_for_drawing();
-      MenuItem_int3::action(GET_TEXT_F(MSG_SPEED), &feedrate_percentage, SPEED_EDIT_MIN, SPEED_EDIT_MAX);
+      ui.clear_lcd();
+      MenuItem_int3::action(GET_TEXT_F(MSG_SPEED), &feedrate_percentage, 10, 500);
+      break;
+    case FLOWRATE:
+      ui.clear_lcd();
+      MenuItemBase::itemIndex = control->data;
+      #if EXTRUDERS == 1
+        MenuItem_int3::action(GET_TEXT_F(MSG_FLOW), &planner.flow_percentage[MenuItemBase::itemIndex], 10, 500, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
+      #else
+        MenuItem_int3::action(GET_TEXT_F(MSG_FLOW_N), &planner.flow_percentage[MenuItemBase::itemIndex], 10, 999, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
+      #endif
       break;
 
-    #if HAS_EXTRUDERS
-      case FLOWRATE:
-        ui.clear_for_drawing();
-        MenuItemBase::itemIndex = control->data;
-        #if EXTRUDERS == 1
-          MenuItem_int3::action(GET_TEXT_F(MSG_FLOW), &planner.flow_percentage[MenuItemBase::itemIndex], FLOW_EDIT_MIN, FLOW_EDIT_MAX, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
-        #else
-          MenuItem_int3::action(GET_TEXT_F(MSG_FLOW_N), &planner.flow_percentage[MenuItemBase::itemIndex], FLOW_EDIT_MIN, FLOW_EDIT_MAX, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
-        #endif
+    case RESUME_PRINT:
+      ui.resume_print();
+      break;
+    case PAUSE_PRINT:
+      ui.pause_print();
+      break;
+    case STOP_PRINT:
+      ui.screen_num = 0;
+      ui.abort_print();
+      ui.clear_lcd();
+      break;
+
+    #if ENABLED(FB_G6_CUSTOM_TRAMMING)
+      case TRAMMING_MOVE_TO_POINT:
+        ui.tramming_move_to_point((uint8_t)control->data);
         break;
     #endif
-
-    case STOP:
-      ui.goto_screen([]{
-        MenuItem_confirm::select_screen(GET_TEXT_F(MSG_BUTTON_STOP),
-          GET_TEXT_F(MSG_BACK), ui.abort_print, ui.goto_previous_screen,
-          GET_TEXT_F(MSG_STOP_PRINT), FSTR_P(nullptr), FPSTR("?"));
-        });
-      break;
 
     #if ENABLED(AUTO_BED_LEVELING_UBL)
       case UBL: hold(control, UBL_REPEAT_DELAY); ui.encoderPosition += control->data; break;
     #endif
+
+    case MOVE_AXIS:
+      ui.goto_screen((screenFunc_t)ui.move_axis_screen);
+      break;
 
     // TODO: TOUCH could receive data to pass to the callback
     case BUTTON: ((screenFunc_t)control->data)(); break;
@@ -264,33 +492,33 @@ void Touch::hold(touch_control_t *control, millis_t delay) {
   ui.refresh();
 }
 
-bool Touch::get_point(int16_t * const x, int16_t * const y) {
-  #if ANY(TFT_TOUCH_DEVICE_XPT2046, TFT_TOUCH_DEVICE_GT911)
-    const bool is_touched = TOUCH_PORTRAIT == _TOUCH_ORIENTATION ? io.getRawPoint(y, x) : io.getRawPoint(x, y);
-  #endif
+bool Touch::get_point(int16_t *x, int16_t *y) {
   #if ENABLED(TFT_TOUCH_DEVICE_XPT2046)
     #if ENABLED(TOUCH_SCREEN_CALIBRATION)
-      if (is_touched && TOUCH_ORIENTATION_NONE != _TOUCH_ORIENTATION) {
-        *x = int16_t((int32_t(*x) * _TOUCH_CALIBRATION_X) >> 16) + _TOUCH_OFFSET_X;
-        *y = int16_t((int32_t(*y) * _TOUCH_CALIBRATION_Y) >> 16) + _TOUCH_OFFSET_Y;
+      bool is_touched = (touch_calibration.calibration.orientation == TOUCH_PORTRAIT ? io.getRawPoint(y, x) : io.getRawPoint(x, y));
+
+      if (is_touched && touch_calibration.calibration.orientation != TOUCH_ORIENTATION_NONE) {
+        *x = int16_t((int32_t(*x) * touch_calibration.calibration.x) >> 16) + touch_calibration.calibration.offset_x;
+        *y = int16_t((int32_t(*y) * touch_calibration.calibration.y) >> 16) + touch_calibration.calibration.offset_y;
       }
     #else
-      *x = uint16_t((uint32_t(*x) * _TOUCH_CALIBRATION_X) >> 16) + _TOUCH_OFFSET_X;
-      *y = uint16_t((uint32_t(*y) * _TOUCH_CALIBRATION_Y) >> 16) + _TOUCH_OFFSET_Y;
+      bool is_touched = (TOUCH_ORIENTATION == TOUCH_PORTRAIT ? io.getRawPoint(y, x) : io.getRawPoint(x, y));
+      *x = uint16_t((uint32_t(*x) * TOUCH_CALIBRATION_X) >> 16) + TOUCH_OFFSET_X;
+      *y = uint16_t((uint32_t(*y) * TOUCH_CALIBRATION_Y) >> 16) + TOUCH_OFFSET_Y;
     #endif
+  #elif ENABLED(TFT_TOUCH_DEVICE_GT911)
+    bool is_touched = (TOUCH_ORIENTATION == TOUCH_PORTRAIT ? io.getPoint(y, x) : io.getPoint(x, y));
   #endif
-
-  #if HAS_DISPLAY_SLEEP
+  #if HAS_TOUCH_SLEEP
     if (is_touched)
       wakeUp();
     else if (!isSleeping() && ELAPSED(millis(), next_sleep_ms) && ui.on_status_screen())
       sleepTimeout();
   #endif
-
   return is_touched;
 }
 
-#if HAS_DISPLAY_SLEEP
+#if HAS_TOUCH_SLEEP
 
   void Touch::sleepTimeout() {
     #if HAS_LCD_BRIGHTNESS
@@ -310,18 +538,24 @@ bool Touch::get_point(int16_t * const x, int16_t * const y) {
       next_touch_ms = millis() + 100;
       safe_delay(20);
     }
-    next_sleep_ms = ui.sleep_timeout_minutes ? millis() + MIN_TO_MS(ui.sleep_timeout_minutes) : 0;
+    next_sleep_ms = millis() + SEC_TO_MS(ui.sleep_timeout_minutes * 60);
   }
 
-  bool MarlinUI::display_is_asleep() { return touch.isSleeping(); }
-  void MarlinUI::sleep_display(const bool sleep/*=true*/) {
-    if (!sleep) touch.wakeUp();
-  }
+#endif // HAS_TOUCH_SLEEP
 
-#endif // HAS_DISPLAY_SLEEP
+Touch touch;
 
 bool MarlinUI::touch_pressed() {
   return touch.is_clicked();
+}
+
+void add_control(uint16_t x, uint16_t y, TouchControlType control_type, intptr_t data, MarlinImage image, bool is_enabled, uint16_t color_enabled, uint16_t color_disabled) {
+  uint16_t width = Images[image].width;
+  uint16_t height = Images[image].height;
+  tft.canvas(x, y, width, height);
+  tft.add_image(0, 0, image, is_enabled ? color_enabled : color_disabled);
+  if (is_enabled)
+    touch.add_control(control_type, x, y, width, height, data);
 }
 
 #endif // TOUCH_SCREEN

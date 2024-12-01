@@ -33,6 +33,16 @@
 #include "../../module/planner.h"
 #include "../../module/temperature.h"
 #include "../../MarlinCore.h"
+#include "../../feature/caselight.h"
+#include "../../MarlinCore.h"
+
+#if ENABLED(FWRETRACT)
+  #include "../../feature/fwretract.h"
+#endif
+
+#if ENABLED(SINGLENOZZLE_STANDBY_TEMP)
+  #include "../../module/tool_change.h"
+#endif
 
 #if HAS_LEVELING
   #include "../../feature/bedlevel/bedlevel.h"
@@ -46,7 +56,23 @@
     #include "../dogm/marlinui_DOGM.h"
   #endif
 
-  // TODO: Replace fmsg with MSG_BABYSTEP_N and index substitution
+#if ENABLED(ADVANCED_PAUSE_FEATURE)
+  void menu_change_filament();
+#endif
+
+#if ENABLED(FWRETRACT)
+  void menu_config_retract();
+#endif
+
+#if ENABLED(ADVANCED_PAUSE_FEATURE)
+  // This menu item is last with an encoder. Otherwise, somewhere in the middle.
+  #if E_STEPPERS == 1 && DISABLED(FILAMENT_LOAD_UNLOAD_GCODES)
+    #define FILAMENT_CHANGE_ITEM() YESNO_ITEM(MSG_FILAMENTCHANGE, menu_change_filament, nullptr, \
+                                    GET_TEXT_F(MSG_FILAMENTCHANGE), (const char *)nullptr, F("?"))
+  #else
+    #define FILAMENT_CHANGE_ITEM() SUBMENU(MSG_FILAMENTCHANGE, menu_change_filament)
+  #endif
+#endif
 
   void _lcd_babystep(const AxisEnum axis, FSTR_P const fmsg) {
     if (ui.use_click()) return ui.goto_previous_screen_no_defer();
@@ -64,7 +90,7 @@
     }
     if (ui.should_draw()) {
       const float mps = planner.mm_per_step[axis];
-      MenuEditItemBase::draw_edit_screen(fmsg, BABYSTEP_TO_STR(mps * babystep.accum));
+      MenuEditItemBase::draw_edit_screen(fmsg, BABYSTEP_TO_STR(mps * babystep.accum), false);
       #if ENABLED(BABYSTEP_DISPLAY_TOTAL)
         const bool in_view = TERN1(HAS_MARLINUI_U8GLIB, PAGE_CONTAINS(LCD_PIXEL_HEIGHT - MENU_FONT_HEIGHT, LCD_PIXEL_HEIGHT - 1));
         if (in_view) {
@@ -105,109 +131,113 @@
 
 void menu_tune() {
   START_MENU();
-  BACK_ITEM(MSG_MAIN_MENU);
+  BACK_ITEM(MSG_MAIN);
+
+  EDIT_ITEM(bool, MSG_CASE_LIGHT, (bool*)&caselight.on, caselight.update_enabled);
+
 
   //
   // Speed:
   //
-  EDIT_ITEM(int3, MSG_SPEED, &feedrate_percentage, SPEED_EDIT_MIN, SPEED_EDIT_MAX);
+  #ifndef DISABLE_MENU_TEMP_FEEDRATE
+    EDIT_ITEM(int3, MSG_SPEED, &feedrate_percentage, 10, 999);
+  #endif
 
   //
   // Manual bed leveling, Bed Z:
   //
-  #if ALL(MESH_BED_LEVELING, LCD_BED_LEVELING)
-    EDIT_ITEM(float43, MSG_MESH_Z_OFFSET, &bedlevel.z_offset, -1, 1);
+  #if BOTH(MESH_BED_LEVELING, LCD_BED_LEVELING)
+    EDIT_ITEM(float43, MSG_BED_Z, &bedlevel.z_offset, -3, 3);
   #endif
 
   //
   // Nozzle:
   // Nozzle [1-4]:
   //
-  #if HOTENDS == 1
-    EDIT_ITEM_FAST(int3, MSG_NOZZLE, &thermalManager.temp_hotend[0].target, 0, thermalManager.hotend_max_target(0), []{ thermalManager.start_watching_hotend(0); });
-  #elif HAS_MULTI_HOTEND
-    HOTEND_LOOP()
-      EDIT_ITEM_FAST_N(int3, e, MSG_NOZZLE_N, &thermalManager.temp_hotend[e].target, 0, thermalManager.hotend_max_target(e), []{ thermalManager.start_watching_hotend(MenuItemBase::itemIndex); });
-  #endif
+  #ifndef DISABLE_MENU_TUNE_TEMP
+    #if HOTENDS == 1
+      EDIT_ITEM_FAST(int3, MSG_NOZZLE, &thermalManager.temp_hotend[0].target, 0, thermalManager.hotend_max_target(0), []{ thermalManager.start_watching_hotend(0); });
+    #elif HAS_MULTI_HOTEND
+      HOTEND_LOOP()
+        EDIT_ITEM_FAST_N(int3, e, MSG_NOZZLE_N, &thermalManager.temp_hotend[e].target, 0, thermalManager.hotend_max_target(e), []{ thermalManager.start_watching_hotend(MenuItemBase::itemIndex); });
+    #endif
 
-  #if ENABLED(SINGLENOZZLE_STANDBY_TEMP)
-    for (uint8_t e = 1; e < EXTRUDERS; ++e)
-      EDIT_ITEM_FAST_N(int3, e, MSG_NOZZLE_STANDBY, &thermalManager.singlenozzle_temp[e], 0, thermalManager.hotend_max_target(0));
-  #endif
+    #if ENABLED(SINGLENOZZLE_STANDBY_TEMP)
+      LOOP_S_L_N(e, 1, EXTRUDERS)
+        EDIT_ITEM_FAST_N(int3, e, MSG_NOZZLE_STANDBY, &thermalManager.singlenozzle_temp[e], 0, thermalManager.hotend_max_target(0));
+    #endif
 
   //
   // Bed:
   //
-  #if HAS_HEATED_BED
-    EDIT_ITEM_FAST(int3, MSG_BED, &thermalManager.temp_bed.target, 0, BED_MAX_TARGET, thermalManager.start_watching_bed);
+    #if HAS_HEATED_BED
+      EDIT_ITEM_FAST(int3, MSG_BED, &thermalManager.temp_bed.target, 0, BED_MAX_TARGET, thermalManager.start_watching_bed);
+    #endif
   #endif
 
   //
   // Fan Speed:
   //
+
   #if HAS_FAN
+    #ifndef DISABLE_MENU_TUNE_FAN
 
-    DEFINE_SINGLENOZZLE_ITEM();
+      DEFINE_SINGLENOZZLE_ITEM();
 
-    #if FAN_IS_M106ABLE(0)
-      _FAN_EDIT_ITEMS(0, FIRST_FAN_SPEED);
-    #endif
-    #if FAN_IS_M106ABLE(1)
-      FAN_EDIT_ITEMS(1);
-    #elif SNFAN(1)
-      singlenozzle_item(1);
-    #endif
-    #if FAN_IS_M106ABLE(2)
-      FAN_EDIT_ITEMS(2);
-    #elif SNFAN(2)
-      singlenozzle_item(2);
-    #endif
-    #if FAN_IS_M106ABLE(3)
-      FAN_EDIT_ITEMS(3);
-    #elif SNFAN(3)
-      singlenozzle_item(3);
-    #endif
-    #if FAN_IS_M106ABLE(4)
-      FAN_EDIT_ITEMS(4);
-    #elif SNFAN(4)
-      singlenozzle_item(4);
-    #endif
-    #if FAN_IS_M106ABLE(5)
-      FAN_EDIT_ITEMS(5);
-    #elif SNFAN(5)
-      singlenozzle_item(5);
-    #endif
-    #if FAN_IS_M106ABLE(6)
-      FAN_EDIT_ITEMS(6);
-    #elif SNFAN(6)
-      singlenozzle_item(6);
-    #endif
-    #if FAN_IS_M106ABLE(7)
-      FAN_EDIT_ITEMS(7);
-    #elif SNFAN(7)
-      singlenozzle_item(7);
+      #if HAS_FAN0
+        _FAN_EDIT_ITEMS(0,FIRST_FAN_SPEED);
+      #endif
+      #if HAS_FAN1
+        FAN_EDIT_ITEMS(1);
+      #elif SNFAN(1)
+        singlenozzle_item(1);
+      #endif
+      #if HAS_FAN2
+        FAN_EDIT_ITEMS(2);
+      #elif SNFAN(2)
+        singlenozzle_item(2);
+      #endif
+      #if HAS_FAN3
+        FAN_EDIT_ITEMS(3);
+      #elif SNFAN(3)
+        singlenozzle_item(3);
+      #endif
+      #if HAS_FAN4
+        FAN_EDIT_ITEMS(4);
+      #elif SNFAN(4)
+        singlenozzle_item(4);
+      #endif
+      #if HAS_FAN5
+        FAN_EDIT_ITEMS(5);
+      #elif SNFAN(5)
+        singlenozzle_item(5);
+      #endif
+      #if HAS_FAN6
+        FAN_EDIT_ITEMS(6);
+      #elif SNFAN(6)
+        singlenozzle_item(6);
+      #endif
+      #if HAS_FAN7
+        FAN_EDIT_ITEMS(7);
+      #elif SNFAN(7)
+        singlenozzle_item(7);
+      #endif
     #endif
 
   #endif // HAS_FAN
 
   //
-  // FT_MOTION
-  //
-  #if ENABLED(FT_MOTION_MENU)
-    void menu_tune_ft_motion();
-    SUBMENU(MSG_FIXED_TIME_MOTION, menu_tune_ft_motion);
-  #endif
-
-  //
   // Flow:
   //
-  #if HAS_EXTRUDERS
-    EDIT_ITEM(int3, MSG_FLOW, &planner.flow_percentage[active_extruder], FLOW_EDIT_MIN, FLOW_EDIT_MAX, []{ planner.refresh_e_factor(active_extruder); });
-    // Flow En:
-    #if HAS_MULTI_EXTRUDER
-      EXTRUDER_LOOP()
-        EDIT_ITEM_N(int3, e, MSG_FLOW_N, &planner.flow_percentage[e], FLOW_EDIT_MIN, FLOW_EDIT_MAX, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
-    #endif
+  #ifndef DISABLE_MENU_TUNE_FLOW
+    #if HAS_EXTRUDERS
+      EDIT_ITEM(int3, MSG_FLOW, &planner.flow_percentage[active_extruder], 10, 999, []{ planner.refresh_e_factor(active_extruder); });
+      // Flow En:
+      #if HAS_MULTI_EXTRUDER
+        EXTRUDER_LOOP()
+          EDIT_ITEM_N(int3, e, MSG_FLOW_N, &planner.flow_percentage[e], 10, 999, []{ planner.refresh_e_factor(MenuItemBase::itemIndex); });
+      #endif
+  #endif
   #endif
 
   //
@@ -222,21 +252,31 @@ void menu_tune() {
     #endif
   #endif
 
+  #if ENABLED(FWRETRACT)
+    SUBMENU(MSG_RETRACT, menu_config_retract);
+  #endif
+
   //
   // Babystep X:
   // Babystep Y:
   // Babystep Z:
   //
-  #if ENABLED(BABYSTEPPING)
-    #if ENABLED(BABYSTEP_XY)
-      SUBMENU_N(X_AXIS, MSG_BABYSTEP_N, []{ _lcd_babystep_go(_lcd_babystep_x); });
-      SUBMENU_N(Y_AXIS, MSG_BABYSTEP_N, []{ _lcd_babystep_go(_lcd_babystep_y); });
+  #ifndef DISABLE_MENU_TUNE_BABBYSTEP
+    #if ENABLED(BABYSTEPPING)
+      #if ENABLED(BABYSTEP_XY)
+        SUBMENU_N(X_AXIS, MSG_BABYSTEP_N, []{ _lcd_babystep_go(_lcd_babystep_x); });
+        SUBMENU_N(Y_AXIS, MSG_BABYSTEP_N, []{ _lcd_babystep_go(_lcd_babystep_y); });
+      #endif
+      #if ENABLED(BABYSTEP_ZPROBE_OFFSET)
+        SUBMENU(MSG_ZPROBE_ZOFFSET, lcd_babystep_zoffset);
+      #else
+        SUBMENU_N(Z_AXIS, MSG_BABYSTEP_N, lcd_babystep_z);
+      #endif
     #endif
-    #if ENABLED(BABYSTEP_ZPROBE_OFFSET)
-      SUBMENU_N(Z_AXIS, MSG_ZPROBE_OFFSET_N, lcd_babystep_zoffset);
-    #else
-      SUBMENU_N(Z_AXIS, MSG_BABYSTEP_N, lcd_babystep_z);
-    #endif
+  #endif
+
+    #if ENABLED(ADVANCED_PAUSE_FEATURE) && DISABLED(DISABLE_ENCODER)
+    FILAMENT_CHANGE_ITEM();
   #endif
 
   END_MENU();

@@ -22,13 +22,13 @@
 
 #include "../../inc/MarlinConfig.h"
 
-#if HAS_MEDIA
+#if ENABLED(SDSUPPORT)
 
 #include "../gcode.h"
 #include "../../sd/cardreader.h"
 
-#if ENABLED(EXTENSIBLE_UI)
-  #include "../../lcd/extui/ui_api.h"
+#if ENABLED(DWIN_LCD_PROUI)
+  #include "../../lcd/e3v2/proui/dwin.h"
 #endif
 
 /**
@@ -36,9 +36,9 @@
  */
 void GcodeSuite::M524() {
 
-  #if ENABLED(EXTENSIBLE_UI)
+  #if ENABLED(DWIN_LCD_PROUI)
 
-    ExtUI::stopPrint(); // Calls ui.abort_print() which does the same as below
+    HMI_flag.abort_flag = true;    // The LCD will handle it
 
   #else
 
@@ -51,4 +51,4 @@ void GcodeSuite::M524() {
 
 }
 
-#endif // HAS_MEDIA
+#endif // SDSUPPORT
