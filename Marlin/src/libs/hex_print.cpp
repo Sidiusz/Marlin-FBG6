@@ -25,7 +25,6 @@
 #if NEED_HEX_PRINT
 
 #include "hex_print.h"
-#include "../core/serial.h"
 
 #ifdef CPU_32_BIT
   constexpr int byte_start = 4;
