@@ -71,6 +71,10 @@ The Issue Queue is reserved for Bug Reports and Feature Requests. To get help wi
 
 Regular users can open and close their own issues, but only the administrators can do project-related things like add labels, merge changes, set milestones, and kick trolls. The current FB-G6 (Marlin) admin team consists of:
 
+FlyingBear Ghost 6 Marlin
+FBG6 Marlin
+Ghost 6 Marlin
+
 <table align="center">
 <tr>
 <td>
