@@ -22,6 +22,7 @@
 
 #include "../gcode.h"
 #include "../../module/settings.h"
+#include "../../core/serial.h"
 #include "../../inc/MarlinConfig.h"
 
 #if ENABLED(CONFIGURATION_EMBEDDING)

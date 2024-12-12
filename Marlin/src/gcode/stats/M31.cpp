@@ -21,6 +21,7 @@
  */
 
 #include "../gcode.h"
+#include "../../core/serial.h"
 #include "../../module/printcounter.h"
 #include "../../libs/duration_t.h"
 #include "../../lcd/marlinui.h"
