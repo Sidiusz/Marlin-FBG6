@@ -1,3 +1,8 @@
+Оригинальная сборка от Павла и других очень хороших людей, я лишь модифицировал её
+Скачать https://github.com/Sidiusz/Marlin-FBG6/releases
+
+Далее оригинальный текст:
+
 <p align="center"><img src="buildroot/share/pixmaps/logo/flying_bear.svg" height="250" alt="Flying Bear logo" /></p>
 
 <h1 align="center">Flying Bear 3D Printer Custom Firmware</h1>
